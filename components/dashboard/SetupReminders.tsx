@@ -52,8 +52,8 @@ export default function SetupReminders({ className = '', onComplete }: SetupRemi
     }
   ];
 
-  // For demo purposes, always show setup reminders
-  const activeSetups = incompleteSetups; // .filter(setup => !dismissedItems.has(setup.id));
+  // Filter out dismissed items
+  const activeSetups = incompleteSetups.filter(setup => !dismissedItems.has(setup.id));
 
   const handleDismiss = (setupId: string) => {
     setDismissedItems(prev => new Set([...prev, setupId]));
