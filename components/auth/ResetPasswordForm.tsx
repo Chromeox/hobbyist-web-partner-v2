@@ -5,8 +5,8 @@
 
 'use client'
 
-import React, { useState, useCallback, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import React, { useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Lock, Loader2, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
@@ -23,7 +23,6 @@ interface FormState {
 
 export function ResetPasswordForm() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const [state, setState] = useState<FormState>({
     password: '',
     confirmPassword: '',
