@@ -1,135 +1,96 @@
 /**
  * OAuth Callback Route Handler
- * Handles OAuth redirects from providers
+ * Handles OAuth redirects and password reset links
  */
 
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import type { Database } from '@/types/supabase'
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
-  const code = requestUrl.searchParams.get('code')
-  const error = requestUrl.searchParams.get('error')
-  const error_code = requestUrl.searchParams.get('error_code')
-  const error_description = requestUrl.searchParams.get('error_description')
   const token_hash = requestUrl.searchParams.get('token_hash')
   const type = requestUrl.searchParams.get('type')
+  const code = requestUrl.searchParams.get('code')
   const next = requestUrl.searchParams.get('next') || '/dashboard'
 
-  console.log('[Auth Callback] Full URL:', requestUrl.href)
-  console.log('[Auth Callback] All search params:', Object.fromEntries(requestUrl.searchParams))
-  console.log('[Auth Callback] Parsed params:', {
-    code: code ? `${code.substring(0, 10)}...` : null,
-    token_hash: token_hash ? `${token_hash.substring(0, 10)}...` : null,
-    type,
-    error,
-    error_code,
+  // CRITICAL: This log MUST appear in production console
+  console.log('=== AUTH CALLBACK EXECUTED ===', {
+    url: requestUrl.href,
     hasTokenHash: !!token_hash,
-    hasType: !!type
+    hasCode: !!code,
+    type
   })
 
-  // Handle OAuth errors from provider
-  if (error || error_code) {
-    console.error('Auth provider error:', { error, error_code, error_description })
+  try {
+    const supabase = await createClient()
 
-    // Handle specific error codes
-    if (error_code === 'otp_expired') {
-      return NextResponse.redirect(
-        new URL(`/auth/signin?error=link_expired&message=${encodeURIComponent('This link has expired. Please request a new one.')}`, requestUrl.origin)
-      )
-    }
+    // Password reset flow (token_hash + type=recovery)
+    if (token_hash && type === 'recovery') {
+      console.log('=== ATTEMPTING PASSWORD RESET VERIFICATION ===')
 
-    return NextResponse.redirect(
-      new URL(`/auth/signin?error=${error || error_code}&message=${encodeURIComponent(error_description || 'Authentication failed')}`, requestUrl.origin)
-    )
-  }
-
-  // Use server client that properly sets cookies
-  const supabase = await createClient()
-
-  // Handle email magic link verification (token_hash flow)
-  if (token_hash && type) {
-    console.log('[Auth Callback] Processing password reset token_hash flow')
-
-    try {
-      // For password reset, we need to use the recovery type
-      const { data, error: verifyError } = await supabase.auth.verifyOtp({
+      const { data, error } = await supabase.auth.verifyOtp({
         token_hash,
         type: 'recovery'
       })
 
-      console.log('[Auth Callback] verifyOtp result:', {
-        success: !verifyError,
-        error: verifyError?.message,
-        errorCode: verifyError?.code,
+      console.log('=== VERIFY OTP RESULT ===', {
+        hasError: !!error,
+        errorMessage: error?.message,
+        errorCode: error?.code,
         hasSession: !!data?.session,
         hasUser: !!data?.user
       })
 
-      if (verifyError) {
-        console.error('[Auth Callback] Password reset verification failed:', {
-          message: verifyError.message,
-          code: verifyError.code,
-          status: verifyError.status
-        })
+      if (error) {
+        console.error('=== PASSWORD RESET FAILED ===', error)
         return NextResponse.redirect(
-          new URL(`/auth/signin?error=verification_failed&message=${encodeURIComponent(verifyError.message || 'Password reset link is invalid or expired')}`, requestUrl.origin)
+          new URL(`/auth/signin?error=${error.code || 'verification_failed'}&message=${encodeURIComponent(error.message)}`, requestUrl.origin)
         )
       }
 
       if (data.session) {
-        console.log('[Auth Callback] Password reset session established, redirecting to reset form')
+        console.log('=== PASSWORD RESET SUCCESS - REDIRECTING TO RESET FORM ===')
         return NextResponse.redirect(new URL(next, requestUrl.origin))
-      } else {
-        console.error('[Auth Callback] No session created after verifyOtp')
-        return NextResponse.redirect(
-          new URL('/auth/signin?error=no_session&message=Unable to establish reset session', requestUrl.origin)
-        )
       }
-    } catch (err) {
-      console.error('[Auth Callback] Unexpected error during password reset verification:', err)
+
+      console.error('=== NO SESSION CREATED ===')
       return NextResponse.redirect(
-        new URL('/auth/signin?error=verification_error&message=An unexpected error occurred', requestUrl.origin)
+        new URL('/auth/signin?error=no_session&message=Could not establish reset session', requestUrl.origin)
       )
     }
-  }
 
-  // Handle OAuth code exchange
-  if (code) {
-    try {
-      const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+    // OAuth code exchange flow
+    if (code) {
+      console.log('=== ATTEMPTING OAUTH CODE EXCHANGE ===')
 
-      console.log('Code exchange result:', {
-        success: !exchangeError,
-        error: exchangeError?.message,
-        hasSession: !!data.session
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+
+      console.log('=== CODE EXCHANGE RESULT ===', {
+        hasError: !!error,
+        errorMessage: error?.message,
+        hasSession: !!data?.session
       })
 
-      if (!exchangeError && data.session) {
-        // Successful authentication - cookies are automatically set by server client
-        console.log('OAuth callback successful, redirecting to:', next)
-        return NextResponse.redirect(new URL(next, requestUrl.origin))
-      } else {
-        console.error('Code exchange failed:', exchangeError)
+      if (error) {
         return NextResponse.redirect(
-          new URL(`/auth/signin?error=session_exchange_failed&message=${encodeURIComponent(exchangeError?.message || 'Unknown error')}`, requestUrl.origin)
+          new URL(`/auth/signin?error=oauth_failed&message=${encodeURIComponent(error.message)}`, requestUrl.origin)
         )
       }
-    } catch (err) {
-      console.error('Unexpected error during code exchange:', err)
-      return NextResponse.redirect(
-        new URL('/auth/signin?error=auth_callback_error&message=Unexpected error', requestUrl.origin)
-      )
+
+      if (data.session) {
+        console.log('=== OAUTH SUCCESS ===')
+        return NextResponse.redirect(new URL(next, requestUrl.origin))
+      }
     }
+
+    // No valid parameters - fallback to client-side handler
+    console.log('=== NO VALID PARAMETERS - REDIRECTING TO CLIENT HANDLER ===')
+    return NextResponse.redirect(new URL('/auth/callback-handler', requestUrl.origin))
+
+  } catch (err) {
+    console.error('=== UNEXPECTED ERROR IN CALLBACK ===', err)
+    return NextResponse.redirect(
+      new URL('/auth/signin?error=callback_error&message=Unexpected error occurred', requestUrl.origin)
+    )
   }
-
-  // No code or token_hash provided - this might be an implicit flow (tokens in fragment)
-  // For implicit flow, the client should handle the tokens
-  console.log('No authorization code or token hash found, checking for implicit flow')
-
-  // Create a redirect to a client-side handler
-  return NextResponse.redirect(
-    new URL('/auth/callback-handler', requestUrl.origin)
-  )
 }
