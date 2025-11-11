@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-export default function TestResetPage() {
+function TestResetContent() {
   const searchParams = useSearchParams();
   const [logs, setLogs] = useState<string[]>([]);
 
@@ -76,5 +76,17 @@ export default function TestResetPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function TestResetPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+      </div>
+    }>
+      <TestResetContent />
+    </Suspense>
   );
 }
