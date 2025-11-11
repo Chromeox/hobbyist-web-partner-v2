@@ -4,7 +4,7 @@
  */
 
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from '@/lib/supabase/server'
 import type { Database } from '@/types/supabase'
 
 export async function GET(request: Request) {
@@ -28,16 +28,8 @@ export async function GET(request: Request) {
   }
 
   if (code) {
-    const supabase = createClient<Database>(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false
-        }
-      }
-    )
+    // Use server client that properly sets cookies
+    const supabase = await createClient()
 
     try {
       const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
@@ -49,7 +41,7 @@ export async function GET(request: Request) {
       })
 
       if (!exchangeError && data.session) {
-        // Successful authentication
+        // Successful authentication - cookies are automatically set by server client
         console.log('OAuth callback successful, redirecting to:', next)
         return NextResponse.redirect(new URL(next, requestUrl.origin))
       } else {
