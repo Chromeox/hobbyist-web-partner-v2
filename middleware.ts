@@ -11,6 +11,20 @@ export async function middleware(request: NextRequest) {
     })
   }
 
+  // CRITICAL: Skip middleware processing for auth callback with token_hash
+  // to prevent consuming one-time tokens before the callback route processes them
+  const hasTokenHash = request.nextUrl.searchParams.has('token_hash');
+  const isAuthCallback = request.nextUrl.pathname === '/auth/callback';
+
+  if (isAuthCallback && hasTokenHash) {
+    console.log('[Middleware] Skipping session refresh for password reset callback');
+    return NextResponse.next({
+      request: {
+        headers: request.headers,
+      },
+    });
+  }
+
   let response = NextResponse.next({
     request: {
       headers: request.headers,
